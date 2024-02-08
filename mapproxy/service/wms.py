@@ -105,8 +105,18 @@ class WMSServer(Server):
                 query = MapQuery(sub_bbox, sub_size, SRS(params.srs), params.format)
 
         actual_layers = odict()
+        dim_defaults = {}
         for layer_name in map_request.params.layers:
             layer = self.layers[layer_name]
+            for dim_name in ['time', 'reference_time']:
+                dimension_obj = self.layers[layer_name].dimensions.get(dim_name)
+                dim_name = f'dim_{dim_name}' if dim_name not in ['time', 'elevation'] else dim_name
+                if dimension_obj:
+                    if dim_defaults.get(dim_name):
+                        dim_defaults[dim_name].append(dimension_obj.default)
+                    else:
+                        dim_defaults[dim_name] = [dimension_obj.default]
+
             # only add if layer renders the query
             if layer.renders_query(query):
                 # if layer is not transparent and will be rendered,
@@ -115,6 +125,11 @@ class WMSServer(Server):
                     actual_layers = odict()
                 for layer_name, map_layers in layer.map_layers_for_query(query):
                     actual_layers[layer_name] = map_layers
+
+        for dim_name in dim_defaults:
+            # if query does not have dimension, add default dimension to query
+            if not query.dimensions.get(dim_name) and len(set(dim_defaults[dim_name])) == 1:
+                query.dimensions[dim_name] = dim_defaults[dim_name][0]
 
         authorized_layers, coverage = self.authorized_layers(
             'map', actual_layers.keys(), map_request.http.environ, query_extent=(query.srs.srs_code, query.bbox))
